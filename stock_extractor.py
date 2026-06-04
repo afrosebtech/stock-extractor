@@ -426,7 +426,7 @@ if uploaded_file is None:
     st.stop()
 
 # ─── Read File ─────────────────────────────────────────────────────────────────
-with st.spinner("Reading file..."):
+with st.spinner("Reading file...."):
     sheets_dict = read_file(uploaded_file)
 
 if not sheets_dict:
