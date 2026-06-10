@@ -549,63 +549,71 @@ if df_filtered is not None and not df_filtered.empty:
 
         st.markdown("<hr class='divider'>", unsafe_allow_html=True)
 
-        # Build Excel with totals row at bottom
+        # Build Excel immediately — BEFORE download button click
+        # This fixes Streamlit re-run issue where sum_cols becomes empty on button click
         try:
-            # Make a copy to add totals row
-            df_download = df_output.copy()
+            from openpyxl.styles import PatternFill, Font, Alignment
 
+            # Convert numeric columns properly (raw df has all strings)
+            df_download = df_output.copy()
+            for c in sum_cols:
+                df_download[c] = pd.to_numeric(df_download[c], errors="coerce")
+
+            # Build totals row using col_totals computed above
             if sum_cols and col_totals:
-                # Build totals row
                 totals_row = {}
                 for c in df_download.columns:
                     if c in col_totals:
-                        totals_row[c] = col_totals[c]
-                    elif c == selected_cols[0]:
+                        totals_row[c] = round(float(col_totals[c]), 2)
+                    elif c == df_download.columns[0]:
                         totals_row[c] = "TOTAL ▶"
                     else:
                         totals_row[c] = ""
                 totals_df = pd.DataFrame([totals_row])
                 df_download = pd.concat([df_download, totals_df], ignore_index=True)
 
-            # Write to Excel with formatting
+            # Write Excel with formatting
             buf = io.BytesIO()
             with pd.ExcelWriter(buf, engine="openpyxl") as writer:
                 df_download.to_excel(writer, index=False, sheet_name="Filtered Stock")
+                ws = writer.sheets["Filtered Stock"]
 
-                # Style the totals row
+                # Style header row — dark blue
+                header_fill = PatternFill(start_color="1E3A5F", end_color="1E3A5F", fill_type="solid")
+                header_font = Font(bold=True, color="FFFFFF", size=11)
+                for col_idx in range(1, ws.max_column + 1):
+                    cell = ws.cell(row=1, column=col_idx)
+                    cell.fill = header_fill
+                    cell.font = header_font
+                    cell.alignment = Alignment(horizontal="center")
+
+                # Style totals row — orange
                 if sum_cols and col_totals:
-                    from openpyxl.styles import PatternFill, Font, Alignment
-                    ws = writer.sheets["Filtered Stock"]
                     last_row = ws.max_row
-                    total_cols_count = ws.max_column
-
                     orange_fill = PatternFill(start_color="F97316", end_color="F97316", fill_type="solid")
-                    bold_white   = Font(bold=True, color="FFFFFF", size=11)
-
-                    for col_idx in range(1, total_cols_count + 1):
+                    bold_white  = Font(bold=True, color="FFFFFF", size=11)
+                    for col_idx in range(1, ws.max_column + 1):
                         cell = ws.cell(row=last_row, column=col_idx)
-                        cell.fill   = orange_fill
-                        cell.font   = bold_white
+                        cell.fill      = orange_fill
+                        cell.font      = bold_white
                         cell.alignment = Alignment(horizontal="center")
 
-                    # Auto-width columns
-                    for col_cells in ws.columns:
-                        max_len = 0
-                        col_letter = col_cells[0].column_letter
-                        for cell in col_cells:
-                            try:
-                                max_len = max(max_len, len(str(cell.value or "")))
-                            except:
-                                pass
-                        ws.column_dimensions[col_letter].width = min(max_len + 4, 30)
+                # Auto-width columns
+                for col_cells in ws.columns:
+                    col_letter = col_cells[0].column_letter
+                    max_len = max((len(str(cell.value or "")) for cell in col_cells), default=8)
+                    ws.column_dimensions[col_letter].width = min(max_len + 4, 35)
 
             excel_bytes = buf.getvalue()
-            safe_wh = warehouse_input.strip().replace(" ","_").replace("/","-")
+            safe_wh = warehouse_input.strip().replace(" ", "_").replace("/", "-")
 
-            st.markdown('<div class="success-box">✅ Excel ready! Last row mein <b>TOTAL row</b> (orange color) hogi.</div>', unsafe_allow_html=True)
+            if sum_cols and col_totals:
+                st.markdown('<div class="success-box">✅ Excel ready! Last row mein <b>TOTAL row 🟠</b> (orange color) hogi.</div>', unsafe_allow_html=True)
+            else:
+                st.markdown('<div class="success-box">✅ Excel ready — download karo!</div>', unsafe_allow_html=True)
 
             st.download_button(
-                label=f"⬇️  Download Excel ({len(df_output):,} rows + Totals)",
+                label=f"⬇️  Download Excel ({len(df_output):,} rows" + (" + Totals Row" if sum_cols else "") + ")",
                 data=excel_bytes,
                 file_name=f"stock_{safe_wh}_{selected_sheet}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
